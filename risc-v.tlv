@@ -48,7 +48,58 @@
    $pc[31:0] = >>1$next_pc + 1;
    
    //Instruction memory
-   `READONLY_MEM($pc, $$instruction[31:0]);
+   `READONLY_MEM($pc, $$instruction[31:0]);  //loads instruction from memory where $pc points to address and stores it in $$instruction
+
+   //Decode Logic - based on RISC-V Instruction Set Specification
+   //$instruction[1:0] must be 2'b11 for opcode to be valid so here we'll assume it is and ignore those bits. That is y we consider [6:2]
+   $is_instr_type_u = $instruction[6:2] == 5'b00101 || $instruction[6:2] == 5'b01101;  //boolean to track instruction type
+
+   $is_instr_type_i = $instruction[6:2] ==? 5'b0000x ||
+                      $instruction[6:2] ==? 5'b001x0 ||    //==? operator allows some bits to be excluded from comparison by setting them to x which mean "don't care". i.e it mean the instruction can can a 0 or a 1 in those bits and the instruction is still valid.
+                      $instruction[6:2] == 5'b11001;
+
+   $is_instr_type_r = $instruction[6:2] == 5'b01011 || $instruction[6:2] == 5'b01100 || 
+                      $instruction[6:2] == 5'b01110 || $instruction[6:2] == 5'b10100;
+
+   $is_instr_type_s = $instruction[6:2] == 5'b01000 || $instruction[6:2] == 5'b01001;
+
+   $is_instr_type_b = $instruction[6:2] == 5'b11000;
+
+   $is_instr_type_j = $instruction[6:2] == 5'b11011;
+
+   //Extract instruction fields from decoded instruction
+   $funct3[2:0] = $instruction[14:12];
+   $rs1[4:0] = $instruction[19:15];
+   $rs2[4:0] = $instruction[24:20];
+   $rd[4:0] = $instruction[11:7];
+   $opcode[6:0] = $instruction[6:0];
+   $imm[31:0] = $is_instr_type_i ? {{21{$instruction[31]}}, $instruction[30:20]} :
+                $is_instr_type_s ? {{21{$instruction[31]}}, $instruction[30:25], $instruction[11:7]} :
+                $is_instr_type_b ? {{20{$instruction[31]}}, $instruction[7], $instruction[30:25], $instruction[11:8], 1'b0} :
+                $is_instr_type_u ? {$instruction[31:12], 12'b0} :
+                $is_instr_type_j ? {{12{$instruction[31]}}, $instruction[19:12], $instruction[20], $instruction[30:21], 1'b0} : 32'b0;
+   
+   //Decode the specific instruction
+   $decoded_instr[10:0] = {$instruction[30], $funct3, $opcode};
+
+   $is_beq = $decoded_instr ==? 11'bx0001100011;    //x because these don't use instruction[30]
+   $is_bne = $decoded_instr ==? 11'bx0011100011;
+   $is_blt = $decoded_instr ==? 11'bx1001100011;
+   $is_bge = $decoded_instr ==? 11'bx1011100011;
+   $is_bltu = $decoded_instr ==? 11'bx1101100011;
+   $is_bgeu = $decoded_instr ==? 11'bx1111100011;
+   $is_addi = $decoded_instr ==? 11'bx0000010011;
+   $is_add = $decoded_instr == 11'b00000110011;
+
+   
+
+   //check instruction fields validity
+   $funct3_valid = $is_instr_type_r || $is_instr_type_i || $is_instr_type_s || $is_instr_type_b;    //funct3 is valid only for these types of instructions as per RISC-V sepecifications
+   $rs1_valid = $is_instr_type_r || $is_instr_type_i || $is_instr_type_s || $is_instr_type_b;
+   $rs2_valid = $$is_instr_type_r || $is_instr_type_s || $is_instr_type_b;
+   $rd_valid = $is_instr_type_r || $is_instr_type_i || $is_instr_type_u || $is_instr_type_j;
+   $imm_valid = $is_instr_type_i || $is_instr_type_s || $is_instr_type_b || $is_instr_type_u || $is_instr_type_j;
+   //no need for opcode validity checking because opcode is always valid.
    
    // Assert these to end simulation (before Makerchip cycle limit).
    *passed = 1'b0;
